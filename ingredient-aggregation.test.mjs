@@ -63,3 +63,22 @@ const appJS = await readFile(new URL('./public/app.js', import.meta.url), 'utf8'
 assert.match(appJS, /from "\.\/ingredient-aggregation\.js"/);
 assert.equal(new URL('./ingredient-aggregation.js', 'https://example.com/mise_studio/app.js').pathname, '/mise_studio/ingredient-aggregation.js');
 console.log('PASS: conservative ingredient identity, exact quantities and conversions, incompatible/unknown amounts, repeated contributions, saved edit conflicts, deterministic non-mutating aggregation, legacy names, and version-1 backups.');
+
+// Long conversion fractions are rounded only for display; original amounts survive.
+for (const [input, expected] of [
+  [['1 cup','100 mL'], '≈ 1.42 cups'],
+  [['100 mL','1 cup'], '≈ 336.59 mL'],
+  [['1 lb','100 g'], '≈ 1.22 lb'],
+  [['100 g','1 lb'], '≈ 553.59 g'],
+  [['1/3 cup','1/6 cup'], '1/2 cups'],
+  [['1 cup','1 tbsp'], '1 1/16 cups'],
+  [['1 lb','8 oz'], '1 1/2 lb'],
+  [['1/125 cup'], '0.008 cups'],
+  [['1/1000000 cup','1/3000000 cup'], '≈ 0.00000133 cups'],
+  // Rounding each contribution first would incorrectly yield 1.84 cups.
+  [['1 cup','100 mL','100 mL'], '≈ 1.85 cups'],
+]) assert.equal(total(input),expected,JSON.stringify(input));
+const mixed = aggregate(['Milk','Milk'],['1 cup','100 mL'])[0];
+assert.equal(mixed.quantity,'≈ 1.42 cups');
+assert.deepEqual(mixed.occurrences.map(o=>o.quantity),['1 cup','100 mL']);
+console.log('PASS: readable mixed-system quantities, approximation markers, exact culinary fractions, tiny amounts, and original measurements.');

@@ -1097,3 +1097,10 @@ assert.match(smartHTML(),/ingredient-name">Minced garlic<\/span>/);
 assert.match(smartHTML(),/ingredient-name">Garlic<\/span>/);
 assert.match(session(smartPath).node('#ingredients-panel').innerHTML,/ingredient-name">Minced garlic<\/span>/);
 console.log('PASS: smart shopping totals, preparation/source details, escaping, repeated recipes, attach/unattach, no render mutation, saved omission conflicts, combine/separate, detached group members and refresh.');
+
+smart.run(`savedRecipes.smart.ingredients=['Milk','Milk'];savedRecipes.smart.ingredientQuantities=['1 cup','100 mL'];delete project.courses[0].dishes[1].recipe;drawIngredients()`);
+assert.match(smartHTML(), /ingredient-quantity">≈ 1.42 cups<\/span>/);
+assert.match(smartHTML(), /1 cup Milk — First/);
+assert.match(smartHTML(), /100 mL Milk — First/);
+assert.equal(smart.run('JSON.stringify(savedRecipes.smart.ingredientQuantities)'), '["1 cup","100 mL"]');
+console.log('PASS: approximate mixed-system total with original measurements preserved in recipe details.');

@@ -55,7 +55,16 @@ export function parseIngredientQuantity(raw) {
 function format([n, d]) {
   if (d === 1n) return String(n);
   const whole = n / d, remainder = n % d;
-  return (whole ? whole + ' ' : '') + remainder + '/' + d;
+  if (d <= 100n)
+    return (whole ? whole + ' ' : '') + remainder + '/' + d;
+  // Presentation only: keep all aggregation arithmetic exact. Round long fractions
+  // to two decimal places, retaining three significant digits for small amounts.
+  let scale = 100n, places = 2;
+  while (n * scale < 100n * d) { scale *= 10n; places++; }
+  const rounded = (n * scale * 2n + d) / (2n * d);
+  const digits = String(rounded % scale).padStart(places, '0').replace(/0+$/, '');
+  const decimal = String(rounded / scale) + (digits ? '.' + digits : '');
+  return (rounded * d === n * scale ? '' : '≈ ') + decimal;
 }
 export function summarizeQuantities(occurrences) {
   const buckets = new Map(), unknown = [];
