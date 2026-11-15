@@ -43,6 +43,7 @@ export function timelineModel(p, recipes) {
         name = dish.name.trim() || "Untitled dish";
       const item = {
         id: dish.id,
+        recipeId: recipe ? dish.recipe.id : null,
         courseId: course.id,
         courseName,
         name,

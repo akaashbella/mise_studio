@@ -79,17 +79,23 @@ function session(path = "/", hooks = {}) {
         listeners[type] = handler;
       },
     },
-    location: { pathname: path },
+    location: { pathname: "/mise_studio/", hash: path.startsWith("#") ? path : "#" + path, search: "" },
     history: {
       pushState(_, __, p) {
-        context.location.pathname = p;
+        const next = new URL(p, "http://localhost" + context.location.pathname);
+        context.location.pathname = next.pathname;
+        context.location.search = next.search;
+        context.location.hash = next.hash;
       },
       replaceState(_, __, p) {
-        context.location.pathname = p;
+        const next = new URL(p, "http://localhost" + context.location.pathname);
+        context.location.pathname = next.pathname;
+        context.location.search = next.search;
+        context.location.hash = next.hash;
       },
     },
     window: {
-      addEventListener() {},
+      addEventListener(type, handler) { listeners[type] = handler; },
       scrollTo() {},
       scrollBy() {},
       innerHeight: 900,
@@ -130,7 +136,7 @@ function session(path = "/", hooks = {}) {
         new URL("./public/storage.js", import.meta.url),
         "utf8",
       ).replaceAll("export function", "function") +
-      ";globalThis.loadWorkspace=loadWorkspace;})()",
+      ";Object.assign(globalThis,{loadWorkspace,encodeBackup,decodeBackup});})()",
     context,
   );
   vm.runInContext(
@@ -165,7 +171,7 @@ function session(path = "/", hooks = {}) {
 const s = session();
 assert.match(s.node("#app").innerHTML, /Mise Studio/);
 s.node("#new-project").onclick();
-const path = s.context.location.pathname;
+const path = s.run("routePath()");
 assert.match(path, /^\/project\//);
 s.node("#project-name").oninput({ target: { value: "Sunday supper" } });
 s.node("#guest-count").oninput({
@@ -215,7 +221,7 @@ s.node("#save-project").onclick();
 assert.equal(s.node("#save-status").textContent, "Project saved");
 const clickLink = (href) =>
   s.listeners.click({
-    target: { closest: () => ({ getAttribute: () => href }) },
+    target: { closest: () => ({ getAttribute: () => "#" + href }) },
     button: 0,
     preventDefault() {},
   });
@@ -223,7 +229,7 @@ clickLink("/");
 assert.match(s.node("#app").innerHTML, /Sunday supper/);
 assert.match(s.node("#app").innerHTML, /8 guests · 3 courses/);
 clickLink(path);
-assert.equal(s.context.location.pathname, path);
+assert.equal(s.run("routePath()"), path);
 assert.equal(s.run("project.courses[2].dishes[0].name"), "Tomato salad");
 const reloaded = session(path);
 assert.equal(reloaded.run("project.name"), "Sunday supper");
@@ -259,13 +265,13 @@ assert.equal(deletionError, true);
 assert.equal(deleting.run("project.id"), projectId);
 deleting.context.localStorage.setItem = originalSet;
 deleting.node("#delete-project").onclick();
-assert.equal(deleting.context.location.pathname, "/");
+assert.equal(deleting.run("routePath()"), "/");
 assert.doesNotMatch(deleting.node("#app").innerHTML, /Sunday supper/);
 assert.match(session(path).node("#app").innerHTML, /Project not found/);
 const cards = session();
 cards.node("#new-project").onclick();
 const cardId = cards.run("project.id");
-cards.context.location.pathname = "/";
+cards.context.location.hash = "#/";
 cards.run("render()");
 assert.match(cards.node("#app").innerHTML, /data-delete-project/);
 cards.node('[data-delete-project="' + cardId + '"]').onclick();
@@ -278,7 +284,7 @@ console.log(
 const w = session("/recipes");
 assert.match(w.node("#app").innerHTML, /Saved recipes/);
 w.node("#new-recipe").onclick();
-const recipePath = w.context.location.pathname,
+const recipePath = w.run("routePath()"),
   id = w.run("Object.keys(recipeDrafts)[0]");
 const input = (selector, value) =>
   w.node(selector).oninput({ target: { value } });
@@ -308,11 +314,11 @@ w.context.localStorage.setItem = () => {
   throw Error("quota");
 };
 assert.equal(w.run(`commitRecipe('${id}')`), false);
-assert.equal(w.context.location.pathname, recipePath);
+assert.equal(w.run("routePath()"), recipePath);
 assert.equal(w.run("Object.keys(savedRecipes).length"), 0);
 w.context.localStorage.setItem = set;
 assert.equal(w.run(`commitRecipe('${id}')`), true);
-assert.equal(w.context.location.pathname, "/recipes");
+assert.equal(w.run("routePath()"), "/recipes");
 assert.match(w.node("#app").innerHTML, /Tomato salad/);
 assert.equal(session("/recipes").run(`savedRecipes['${id}'].servings`), 6);
 w.node("#new-recipe").onclick();
@@ -323,7 +329,7 @@ input("#step-0", "Simmer");
 input("#minutes-0", "20");
 w.run(`commitRecipe('${second}')`);
 w.run("createProject()");
-const pp = w.context.location.pathname;
+const pp = w.run("routePath()");
 w.run(
   'addCourse();addDish(project.courses[0]);addDish(project.courses[0]);project.courses[0].dishes[0].name="Salad";project.courses[0].dishes[1].name="Soup";',
 );
@@ -347,7 +353,7 @@ input("#step-0", "Cook");
 input("#minutes-0", "10");
 w.node("#tag-input").value = "";
 w.node("#recipe-form").onsubmit({ preventDefault() {} });
-assert.equal(w.context.location.pathname, pp);
+assert.equal(w.run("routePath()"), pp);
 assert.equal(w.run("project.courses[0].dishes[1].recipe.id"), custom);
 assert.equal(w.run("project.activeTab"), "recipes");
 w.node("#continue-ingredients").onclick();
@@ -363,7 +369,7 @@ w.run(`navigate('/recipe/edit/${id}')`);
 input("#recipe-title", "Updated salad");
 w.node("#tag-input").value = "";
 w.node("#recipe-form").onsubmit({ preventDefault() {} });
-assert.equal(w.context.location.pathname, "/recipes");
+assert.equal(w.run("routePath()"), "/recipes");
 w.run(`navigate('${pp}')`);
 assert.equal(
   w.run("attachedRecipe(project.courses[0].dishes[0]).title"),
@@ -579,7 +585,7 @@ const bulk = session();
 bulk.run(
   `savedRecipes.bulk={id:'bulk',title:'Bulk recipe',servings:4,tags:[],ingredients:['Salt, to taste','Pepper','Maple or honey'],steps:[{text:'Mix',minutes:1}]};createProject();project.courses=[{id:'bulk-course',name:'Main',time:'',dishes:[{id:'bulk-dish',name:'Dinner',recipe:{provider:'custom',id:'bulk'}}]}];setTab('ingredients');`,
 );
-const bulkPath = bulk.context.location.pathname;
+const bulkPath = bulk.run("routePath()");
 const selectRow = (i) =>
   bulk.node("#ingredient-select-" + i).onchange({ target: { checked: true } });
 const names = () =>
@@ -701,7 +707,7 @@ console.log(
 );
 const steps = session("/recipes");
 steps.node("#new-recipe").onclick();
-const stepsPath = steps.context.location.pathname,
+const stepsPath = steps.run("routePath()"),
   stepsId = steps.run("Object.keys(recipeDrafts).at(-1)");
 steps.run(
   `recipeDrafts['${stepsId}'].title='Step order';recipeDrafts['${stepsId}'].ingredients=['Salt'];recipeDrafts['${stepsId}'].steps=[{text:'Chop',minutes:3},{text:'Cook',minutes:15},{text:'Serve',minutes:1}];showRecipeEditor('${stepsId}')`,
@@ -754,7 +760,7 @@ console.log(
 const quantity = session("/recipes");
 quantity.node("#new-recipe").onclick();
 const quantityId = quantity.run("Object.keys(recipeDrafts).at(-1)"),
-  quantityPath = quantity.context.location.pathname;
+  quantityPath = quantity.run("routePath()");
 quantity.node("#ingredient-0").oninput({ target: { value: "Flour" } });
 quantity.node("#quantity-0").oninput({ target: { value: "½ cup" } });
 quantity.node("#quantity-0").onkeydown({ key: "Enter", preventDefault() {} });
@@ -948,7 +954,7 @@ const savedCount = finder.run("Object.keys(savedRecipes).length");
 finder.node("#recipe-search-option-1").onclick();
 await new Promise((resolve) => setTimeout(resolve, 30));
 const importedId = finder.run("Object.keys(recipeDrafts).at(-1)");
-assert.match(finder.context.location.pathname, /\/recipe\/new\//);
+assert.match(finder.run("routePath()"), /\/recipe\/new\//);
 assert.equal(
   finder.run(`recipeDrafts['${importedId}'].title`),
   "Weeknight Pad Thai",
@@ -1036,7 +1042,7 @@ const timeline = session();
 timeline.run(
   `savedRecipes.timelineRecipe={id:'timelineRecipe',title:'Dinner',servings:4,tags:[],ingredients:['salt'],steps:[{text:'Chop vegetables',minutes:10},{text:'Cook gently',minutes:20},{text:'Plate dinner',minutes:5}]};createProject();project.courses=[{id:'c1',name:'Main',time:'18:00',dishes:[{id:'d1',name:'Dish one',recipe:{provider:'custom',id:'timelineRecipe'}},{id:'d2',name:'Dish two',recipe:{provider:'custom',id:'timelineRecipe'}}]},{id:'c2',name:'Dessert',time:'18:30',dishes:[{id:'d3',name:'Dish three',recipe:{provider:'custom',id:'timelineRecipe'}}]}];setTab('timeline');`,
 );
-const timelinePath = timeline.context.location.pathname;
+const timelinePath = timeline.run("routePath()");
 const model = () =>
   JSON.parse(
     timeline.run("JSON.stringify(timelineModel(project,savedRecipes))"),
@@ -1185,7 +1191,7 @@ console.log(
   "PASS: corrupt-data write protection, stale-tab conflict protection, and Ingredients-to-Timeline continuation.",
 );
 const axis=session();axis.run(`savedRecipes.axisRecipe={id:'axisRecipe',title:'Row test',servings:4,tags:[],ingredients:['Salt'],steps:[{text:'Chop vegetables',minutes:10},{text:'Cook vegetables',minutes:10},{text:'Serve vegetables',minutes:10}]};createProject();project.courses=[{id:'axis-course',name:'Main',time:'18:00',dishes:[{id:'axis-one',name:'First dish',recipe:{provider:'custom',id:'axisRecipe'}},{id:'axis-two',name:'Second dish',recipe:{provider:'custom',id:'axisRecipe'}}]}];setTab('timeline')`);
-const axisPath=axis.context.location.pathname;
+const axisPath=axis.run("routePath()");
 const rowDimensions=()=>[...axis.node('#timeline-panel').innerHTML.matchAll(/class="tl-axis-row[^"]*" style="top:(\d+)px;height:(\d+)px"/g)].map(m=>({top:Number(m[1]),height:Number(m[2])}));
 assert.doesNotMatch(axis.node('#timeline-panel').innerHTML,/tl-filters|tl-dish-filter/);
 assert.match(axis.node('#timeline-panel').innerHTML,/class="tl-row-axis" aria-label="Dish rows"/);
@@ -1218,6 +1224,112 @@ assert.match(cardLayout.node('#app').innerHTML,/Serves 6, 27.5 min across 3 step
 assert.doesNotMatch(cardLayout.node('#app').innerHTML,/1 ingredients · 3 steps/);
 assert.match(cardLayout.node('#app').innerHTML,/id="new-recipe"/);assert.match(cardLayout.node('#app').innerHTML,/class="project-card new-recipe-card" id="new-recipe-card"/);
 cardLayout.node('#recipe-search').oninput({target:{value:'nothing-matches-this-tag'}});assert.match(cardLayout.node('#library-results').innerHTML,/new-recipe-card/);
-cardLayout.node('#library-results').onclick({target:{closest:selector=>selector==='#new-recipe-card'?{}:null}});assert.match(cardLayout.context.location.pathname,/\/recipe\/new\//);
+cardLayout.node('#library-results').onclick({target:{closest:selector=>selector==='#new-recipe-card'?{}:null}});assert.match(cardLayout.run("routePath()"),/\/recipe\/new\//);
 assert.match(readFileSync(new URL('./public/style.css',import.meta.url),'utf8'),/\.saved-recipe-grid\s*\{[^}]*grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
 console.log('PASS: saved recipe summary, removed bottom counts, additional working recipe card after filtering, and three-column grid.');
+
+const rowLinks = session(axisPath);
+rowLinks.run("setTab('timeline')");
+assert.match(rowLinks.node('#timeline-panel').innerHTML, /<a class="tl-axis-row"[^>]*href="#\/recipe\/edit\/axisRecipe\?timeline=[^"]+"/);
+rowLinks.run("project.courses[0].time='';project.courses[0].dishes.push({id:'unattached',name:'No recipe'});drawTimeline()");
+assert.match(rowLinks.node('#timeline-panel').innerHTML, /<a class="tl-axis-row"[^>]*href="#\/recipe\/edit\/axisRecipe\?timeline=[^"]+"/);
+assert.match(rowLinks.node('#timeline-panel').innerHTML, /<div class="tl-axis-row"[^>]*title="No recipe/);
+rowLinks.listeners.click({target:{closest:()=>({getAttribute:()=>'#/recipe/edit/axisRecipe'})},button:0,preventDefault(){}});
+assert.equal(rowLinks.run("routePath()"), '/recipe/edit/axisRecipe');
+assert.match(rowLinks.node('#app').innerHTML, /Row test/);
+console.log('PASS: timeline labels open attached recipes, including unscheduled dishes; unattached dishes retain plain labels.');
+
+const fromTimeline = session(axisPath);
+fromTimeline.run("setTab('timeline')");
+const recipeLink = fromTimeline.node('#timeline-panel').innerHTML.match(/href="([^"]+timeline=[^"]+)"/)[1];
+const clickTimelineReturnLink = href => fromTimeline.listeners.click({target:{closest:()=>({getAttribute:()=>href})},button:0,preventDefault(){}});
+clickTimelineReturnLink(recipeLink);
+assert.match(fromTimeline.node('#app').innerHTML,/Return to timeline/);
+const returnLink = fromTimeline.node('#app').innerHTML.match(/class="back" href="([^"]+)"/)[1];
+clickTimelineReturnLink(returnLink);
+assert.equal(fromTimeline.run("routePath()"),axisPath);
+assert.equal(fromTimeline.run('project.activeTab'),'timeline');
+clickTimelineReturnLink('#/recipe/edit/axisRecipe');
+assert.doesNotMatch(fromTimeline.node('#app').innerHTML,/Return to timeline/);
+console.log('PASS: recipe timeline return link and library navigation context.');
+
+
+
+// The same hash route runs under a repository prefix and survives reload/history.
+const pages = session('/recipes');
+assert.equal(pages.context.location.pathname, '/mise_studio/');
+pages.node('#new-recipe').onclick();
+assert.match(pages.context.location.hash, /^#\/recipe\/new\//);
+const pageHash = pages.context.location.hash;
+assert.match(session(pageHash).node('#app').innerHTML, /Create a recipe/);
+pages.context.location.hash = '#/recipes'; pages.listeners.hashchange();
+assert.match(pages.node('#app').innerHTML, /Saved recipes/);
+pages.context.location.hash = pageHash; pages.listeners.popstate();
+assert.match(pages.node('#app').innerHTML, /Create a recipe/);
+assert.doesNotMatch(pages.node('#app').innerHTML, /href="\//);
+const markup = readFileSync(new URL('./public/index.html', import.meta.url), 'utf8');
+assert.match(markup, /href="\.\/style.css"/);
+assert.match(markup, /src="\.\/app.js"/);
+
+const backupSession = session();
+const backupText = backupSession.run('encodeBackup(JSON.parse(snapshot()))');
+const beforeRestore = saved.get('mise-studio-data-v2');
+backupSession.context.backupText = backupText;
+let confirmed = 0;
+backupSession.context.confirm = () => { confirmed++; return false; };
+assert.equal(backupSession.run('restoreWorkspace(backupText)'), false);
+assert.equal(saved.get('mise-studio-data-v2'), beforeRestore);
+for (const invalid of ['{broken', JSON.stringify({format:'mise-studio-workspace',version:99}), JSON.stringify({format:'mise-studio-workspace',version:1,workspace:{}}), JSON.stringify({format:'mise-studio-workspace',version:1,workspace:{projects:{bad:{id:'bad'}},recipes:{},drafts:{}}})]) {
+  backupSession.context.invalidBackup = invalid;
+  assert.throws(() => backupSession.run('restoreWorkspace(invalidBackup)'));
+  assert.equal(saved.get('mise-studio-data-v2'), beforeRestore);
+}
+assert.equal(confirmed, 1);
+backupSession.context.confirm = () => true;
+const writeBackup = backupSession.context.localStorage.setItem;
+backupSession.context.localStorage.setItem = () => { throw Error('Quota exceeded'); };
+const memoryBefore = backupSession.run('snapshot()');
+assert.throws(() => backupSession.run('restoreWorkspace(backupText)'), /Quota/);
+assert.equal(backupSession.run('snapshot()'), memoryBefore);
+assert.equal(saved.get('mise-studio-data-v2'), beforeRestore);
+backupSession.context.localStorage.setItem = writeBackup;
+saved.set('mise-studio-data-v2', JSON.stringify({projects:{},recipes:{},drafts:{}}));
+assert.throws(() => backupSession.run('restoreWorkspace(backupText)'), /another tab/);
+const freshImport = session();
+freshImport.context.backupText = backupText;
+assert.equal(freshImport.run('restoreWorkspace(backupText)'), true);
+assert.deepEqual(JSON.parse(freshImport.run('snapshot()')), JSON.parse(backupText).workspace);
+assert.deepEqual(JSON.parse(session().run('snapshot()')), JSON.parse(backupText).workspace);
+assert.match(freshImport.node('#backup-status').textContent, /successfully/);
+// File chooser errors and cancellation are visible and never mutate existing data.
+freshImport.node('#backup-file').files = [{size:10,text:async()=>'{bad'}];
+await freshImport.node('#backup-file').onchange();
+assert.match(freshImport.node('#backup-status').textContent, /Unable to import/);
+freshImport.context.confirm = () => false;
+freshImport.node('#backup-file').files = [{size:backupText.length,text:async()=>backupText}];
+await freshImport.node('#backup-file').onchange();
+assert.match(freshImport.node('#backup-status').textContent, /canceled/);
+assert.equal(freshImport.node('#backup-file').value, '');
+console.log('PASS: repository-prefix hash routing, refresh/history, relative assets, complete backup round-trip, cancellation, invalid versions/data, failed writes, stale tabs, and file input errors.');
+
+// Integration regressions: imported metadata and Parthiv's optional workspace marker
+// survive upstream's version-1 backup flow. Legacy backups stay readable too.
+assert.equal(JSON.parse(backupText).version, 1);
+assert.equal(JSON.parse(backupText).workspace.schemaVersion, 3);
+assert.equal(freshImport.run('decodeBackup(backupText).schemaVersion'), 3);
+const legacyBackupText = JSON.parse(backupText);
+delete legacyBackupText.workspace.schemaVersion;
+freshImport.context.legacyBackupText = JSON.stringify(legacyBackupText);
+assert.equal(freshImport.run('decodeBackup(legacyBackupText).schemaVersion'), undefined);
+freshImport.context.confirm = message => {
+  assert.doesNotMatch(message, /schemaVersion/);
+  assert.match(message, /projects.*recipes.*drafts/);
+  return true;
+};
+assert.equal(freshImport.run('restoreWorkspace(legacyBackupText)'), true);
+assert.deepEqual(JSON.parse(freshImport.run('snapshot()')).recipes, legacyBackupText.workspace.recipes);
+assert.deepEqual(JSON.parse(freshImport.run('snapshot()')).drafts, legacyBackupText.workspace.drafts);
+assert.doesNotMatch(finder.node('#app').innerHTML, /href="\//);
+finder.run('navigate("/recipes")');
+assert.doesNotMatch(finder.node('#library-results').innerHTML, /href="\//);
+console.log('PASS: integrated hash navigation, imported metadata backup round-trip, optional workspace marker and legacy backup restore.');

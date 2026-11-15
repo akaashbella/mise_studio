@@ -1,4 +1,4 @@
-import { loadWorkspace } from "./storage.js";
+import { loadWorkspace, encodeBackup, decodeBackup } from "./storage.js";
 import { timelineTime, timelineModel } from "./timeline-model.js";
 import {
   bindRecipeImport,
@@ -7,6 +7,11 @@ import {
   recipeSearchMarkup,
 } from "./recipe-import.js";
 const app = document.querySelector("#app");
+function routeURL() {
+  return new URL(location.hash?.slice(1) || "/", "https://mise.invalid");
+}
+function routePath() { return routeURL().pathname; }
+function routeHref(path) { return "#" + path.replace(/^#/, ""); }
 const storageKey = "mise-studio-data-v2";
 let projects = Object.create(null),
   savedRecipes = Object.create(null),
@@ -72,7 +77,7 @@ function save() {
       ? storageConflict
         ? "Changed in another tab · keep this tab open"
         : "Unable to save · keep this tab open"
-      : location.pathname.startsWith("/recipe/")
+      : routePath().startsWith("/recipe/")
         ? "Draft saved on this device"
         : "Saved on this device";
 }
@@ -80,7 +85,7 @@ function createProject() {
   const id = crypto.randomUUID();
   projects[id] = { id, name: "", guests: 4, date: today(), courses: [] };
   save();
-  history.pushState({}, "", "/project/" + id);
+  history.pushState({}, "", routeHref("/project/" + id));
   render();
   return projects[id];
 }
@@ -108,16 +113,17 @@ function deleteProject(id) {
     return;
   }
   projects = remaining;
-  if (project?.id === id) history.replaceState({}, "", "/");
+  if (project?.id === id) history.replaceState({}, "", "#/");
   render();
   document.querySelector("#new-project")?.focus();
 }
 function home() {
-  const recipesTab = location.pathname === "/recipes";
+  const recipesTab = routePath() === "/recipes";
   const list = Object.values(projects).filter(
     (p) => p && /^[a-zA-Z0-9-]+$/.test(p.id) && Array.isArray(p.courses),
   );
-  app.innerHTML = `<main class="home home-projects"><div class="home-heading"><h1>Mise Studio<span class="period">.</span></h1><div class="home-recipe-actions"><button class="primary" id="${recipesTab ? "new-recipe" : "new-project"}"><span aria-hidden="true">＋</span> New ${recipesTab ? "recipe" : "project"}</button></div></div><nav class="project-tabs home-tabs" aria-label="Home"><a href="/" ${!recipesTab ? 'aria-current="page"' : ""}>Projects</a><a href="/recipes" ${recipesTab ? 'aria-current="page"' : ""}>Saved recipes</a></nav>${storageReadFailed ? '<p class="storage-error" role="alert">Saved data could not be loaded. Existing data has been preserved; saving is disabled. Keep this tab open and check browser storage before continuing.</p>' : ""}<section class="saved-projects">${recipesTab ? libraryMarkup() : `<h2>Your projects</h2>${list.length ? `<div class="project-grid">${list.map((p) => `<article class="project-card-shell"><a class="project-card" href="/project/${p.id}"><span class="eyebrow">${esc(p.date || "Date not set")}</span><h3>${esc(p.name.trim() || "Untitled project")}</h3><div class="project-card-bottom"><span>${esc(p.guests)} ${p.guests === 1 ? "guest" : "guests"} · ${p.courses.length} ${p.courses.length === 1 ? "course" : "courses"}</span><span aria-hidden="true">↗</span></div></a><button class="delete-button card-delete" data-delete-project="${p.id}" aria-label="Delete ${esc(p.name || "Untitled project")}">Delete</button></article>`).join("")}</div>` : '<div class="empty"><h3>A place for your next gathering.</h3><p>Create a project to begin planning.</p></div>'}`}</section></main>`;
+  app.innerHTML = `<main class="home home-projects"><div class="home-heading"><h1>Mise Studio<span class="period">.</span></h1><div class="home-recipe-actions"><button class="primary" id="${recipesTab ? "new-recipe" : "new-project"}"><span aria-hidden="true">＋</span> New ${recipesTab ? "recipe" : "project"}</button></div></div><nav class="project-tabs home-tabs" aria-label="Home"><a href="#/" ${!recipesTab ? 'aria-current="page"' : ""}>Projects</a><a href="#/recipes" ${recipesTab ? 'aria-current="page"' : ""}>Saved recipes</a></nav>${storageReadFailed ? '<p class="storage-error" role="alert">Saved data could not be loaded. Existing data has been preserved; saving is disabled. Keep this tab open and check browser storage before continuing.</p>' : ""}<section class="saved-projects">${recipesTab ? libraryMarkup() : `<h2>Your projects</h2>${list.length ? `<div class="project-grid">${list.map((p) => `<article class="project-card-shell"><a class="project-card" href="#/project/${p.id}"><span class="eyebrow">${esc(p.date || "Date not set")}</span><h3>${esc(p.name.trim() || "Untitled project")}</h3><div class="project-card-bottom"><span>${esc(p.guests)} ${p.guests === 1 ? "guest" : "guests"} · ${p.courses.length} ${p.courses.length === 1 ? "course" : "courses"}</span><span aria-hidden="true">↗</span></div></a><button class="delete-button card-delete" data-delete-project="${p.id}" aria-label="Delete ${esc(p.name || "Untitled project")}">Delete</button></article>`).join("")}</div>` : '<div class="empty"><h3>A place for your next gathering.</h3><p>Create a project to begin planning.</p></div>'}`}</section><section class="workspace-backup" aria-label="Workspace backup"><p>Saved in this browser. Export a backup to keep a copy or move to another device. Project links do not share your data.</p><div class="backup-actions"><button class="secondary" id="export-workspace">Export workspace</button><button class="secondary" id="import-workspace">Import workspace</button><input type="file" id="backup-file" accept=".json,application/json" hidden></div><p id="backup-status" role="status"></p></section></main>`;
+  bindBackupControls();
   if (recipesTab) {
     document.querySelector("#new-recipe").onclick = () => startRecipe();
     document.querySelector("#library-results").onclick = e => { if(e.target.closest("#new-recipe-card")) startRecipe(); };
@@ -165,8 +171,8 @@ function moveCourse(id, index) {
     `${course.name || "Course"} moved to position ${index + 1}.`;
 }
 function editor() {
-  app.innerHTML = `<header class="topbar"><a class="brand" href="/">Mise Studio<span class="period">.</span></a><div class="save-controls"><span id="save-status" role="status">${storageFailed ? "Unable to save · keep this tab open" : "Saved on this device"}</span><button class="delete-button" id="delete-project">Delete</button><button class="primary save-button" id="save-project">Save</button></div></header>
-  <main class="workspace"><a class="back" href="/">← <span>Home</span></a><div class="page-heading"><div class="eyebrow">THE PLAN</div><h1>Your next gathering<span class="period">.</span></h1></div>
+  app.innerHTML = `<header class="topbar"><a class="brand" href="#/">Mise Studio<span class="period">.</span></a><div class="save-controls"><span id="save-status" role="status">${storageFailed ? "Unable to save · keep this tab open" : "Saved on this device"}</span><button class="delete-button" id="delete-project">Delete</button><button class="primary save-button" id="save-project">Save</button></div></header>
+  <main class="workspace"><a class="back" href="#/">← <span>Home</span></a><div class="page-heading"><div class="eyebrow">THE PLAN</div><h1>Your next gathering<span class="period">.</span></h1></div>
   <div class="project-tabs" role="tablist" aria-label="Project workspace"><button id="planner-tab" role="tab" aria-controls="planner-panel" aria-selected="true">Planner</button><button id="recipes-tab" role="tab" aria-controls="recipes-panel" aria-selected="false" tabindex="-1">Recipes</button><button id="ingredients-tab" role="tab" aria-controls="ingredients-panel" aria-selected="false" tabindex="-1">Ingredients</button><button id="timeline-tab" role="tab" aria-controls="timeline-panel" aria-selected="false" tabindex="-1">Timeline</button></div><div id="planner-panel" role="tabpanel" aria-labelledby="planner-tab"><section class="parameters" aria-label="Project parameters"><label class="name-field">Project name<input id="project-name" type="text" maxlength="120" placeholder="e.g. Sunday supper" value="${esc(project.name)}"></label><label>Guests<input id="guest-count" type="number" min="1" max="999" step="1" value="${project.guests}" required></label><label>Date<input id="project-date" type="date" value="${esc(project.date)}" required></label></section>
   <section class="menu" aria-labelledby="courses-heading"><div class="section-heading"><h2 id="courses-heading">Courses <span id="course-count"></span></h2><span class="reorder-hint">Drag to arrange your menu</span></div><div id="courses"></div><button id="add-course" class="add-course">＋ <span>Add course</span></button></section><div class="finalize-row"><p id="planner-message" role="status"></p><button class="primary" id="finalize">Finalize →</button></div></div><section id="recipes-panel" role="tabpanel" aria-labelledby="recipes-tab" hidden></section><div class="finalize-row" id="recipe-continue-row" hidden><button class="primary" id="continue-ingredients">Continue →</button></div><section id="ingredients-panel" role="tabpanel" aria-labelledby="ingredients-tab" hidden></section><section id="timeline-panel" role="tabpanel" aria-labelledby="timeline-tab" hidden></section><div id="announcement" class="sr-only" aria-live="polite"></div></main>`;
   document.querySelector("#project-name").oninput = (e) => {
@@ -363,7 +369,7 @@ function drawCourses() {
 }
 function render() {
   disposeRecipeBindings();
-  const recipePath = location.pathname.match(
+  const recipePath = routePath().match(
     /^\/recipe\/(?:new|edit)\/([a-zA-Z0-9-]+)\/?$/,
   );
   if (recipePath) {
@@ -372,7 +378,7 @@ function render() {
     return;
   }
 
-  const id = location.pathname.match(/^\/project\/([a-zA-Z0-9-]+)\/?$/)?.[1];
+  const id = routePath().match(/^\/project\/([a-zA-Z0-9-]+)\/?$/)?.[1];
   if (!id) {
     project = null;
     home();
@@ -381,19 +387,17 @@ function render() {
   project = projects[id];
   if (!project || !Array.isArray(project.courses)) {
     app.innerHTML =
-      '<main class="home"><h1>Project not found.</h1><a class="primary" href="/">Back to home</a></main>';
+      '<main class="home"><h1>Project not found.</h1><a class="primary" href="#/">Back to home</a></main>';
     return;
   }
+  if (routeURL().searchParams.get("tab") === "timeline") project.activeTab = "timeline";
   editor();
 }
 document.addEventListener("click", (e) => {
   const a = e.target.closest("a[href]");
   if (
     a &&
-    (a.getAttribute("href") === "/" ||
-      a.getAttribute("href") === "/recipes" ||
-      a.getAttribute("href").startsWith("/project/") ||
-      a.getAttribute("href").startsWith("/recipe/")) &&
+    a.getAttribute("href").startsWith("#/") &&
     !e.ctrlKey &&
     !e.metaKey &&
     !e.shiftKey &&
@@ -407,6 +411,7 @@ document.addEventListener("click", (e) => {
   }
 });
 window.addEventListener("popstate", render);
+window.addEventListener("hashchange", render);
 render();
 if (document.modelContext?.registerTool) {
   const lifecycle = new AbortController();
@@ -480,7 +485,7 @@ function setTab(tab, persist = true) {
   if (project.activeTab === "timeline") drawTimeline();
 }
 function navigate(path) {
-  history.pushState({}, "", path);
+  history.pushState({}, "", routeHref(path));
   render();
   window.scrollTo(0, 0);
 }
@@ -543,7 +548,7 @@ function libraryCards(query) {
           r.steps.reduce((sum, step) => sum + Number(step.minutes), 0).toFixed(2),
         );
         return (
-          '<a class="project-card" href="/recipe/edit/' +
+          '<a class="project-card" href="#/recipe/edit/' +
           r.id +
           '"><span class="recipe-card-meta">Serves ' +
           esc(r.servings) +
@@ -610,6 +615,10 @@ function startRecipe(context) {
   save();
   navigate("/recipe/new/" + id);
 }
+function timelineReturnPath() {
+  const id = routeURL().searchParams.get("timeline");
+  return id && projects[id] ? "/project/" + encodeURIComponent(id) + "?tab=timeline" : null;
+}
 function showRecipeEditor(id) {
   disposeRecipeBindings();
   if (!recipeDrafts[id] && savedRecipes[id])
@@ -617,17 +626,18 @@ function showRecipeEditor(id) {
   const d = recipeDrafts[id];
   if (!d) {
     app.innerHTML =
-      '<main class="home"><h1>Recipe not found.</h1><a href="/recipes">Saved recipes</a></main>';
+      '<main class="home"><h1>Recipe not found.</h1><a href="#/recipes">Saved recipes</a></main>';
     return;
   }
   d.ingredientQuantities = d.ingredients.map(
     (name, i) => d.ingredientQuantities?.[i] || "",
   );
-  const back =
+  const timelineBack = timelineReturnPath();
+  const back = timelineBack || (
     d.returnTo && projects[d.returnTo.projectId]
       ? "/project/" + d.returnTo.projectId
-      : "/recipes";
-  app.innerHTML = `<header class="topbar"><a class="brand" href="/">Mise Studio<span class="period">.</span></a><span id="save-status" role="status">Recipe draft</span></header><main class="workspace recipe-editor"><a class="back" href="${back}">← ${d.returnTo ? "Back to project" : "Saved recipes"}</a><div class="page-heading recipe-title-row"><div><div class="eyebrow">YOUR RECIPE</div><h1>${savedRecipes[id] ? "Edit recipe" : "Create a recipe"}<span class="period">.</span></h1></div><button class="primary save-button" type="submit" form="recipe-form">Save recipe</button></div>${recipeSource(d)}<form id="recipe-form"><p id="recipe-error" role="alert"></p><section class="recipe-section recipe-import" aria-label="Import a recipe"><h2>Find a recipe</h2><p>Search for a dish, paste a link, or paste labelled recipe text. Review ingredients, steps, and times before saving. Unknown times stay blank.</p>${recipeSearchMarkup({ id: "import-search", listId: "import-search-list", statusId: "import-search-status", placeholder: "e.g. cucumber salad, or paste https://" })}<input id="import-url" type="url" hidden maxlength="4096" autocomplete="off"><button type="button" id="import-from-url" hidden>Import URL</button><label class="grow">Or paste a recipe<textarea id="import-text" rows="6" maxlength="100000" placeholder="Title&#10;&#10;Ingredients&#10;- 1 item&#10;&#10;Instructions&#10;1. Cook."></textarea></label><button type="button" class="secondary" id="import-from-text">Import pasted text</button><p id="import-status" class="recipe-import-status" role="status">${d.importNotice ? esc(d.importNotice) : ""}</p><div id="import-choices" class="import-choices"></div></section><section class="parameters"><label class="name-field">Recipe name<input id="recipe-title" maxlength="160" required value="${esc(d.title)}" placeholder="e.g. Japanese potato salad"></label><label>Serves<input id="recipe-servings" type="number" min="1" max="999" step="1" value="${esc(d.servings ?? "")}"></label></section><section class="recipe-section"><h2>Tags</h2><div class="tags">${d.tags.map((t, i) => `<button type="button" class="tag" id="tag-${i}" aria-label="Remove tag ${esc(t)}">${esc(t)} ×</button>`).join("")}</div><div class="entry-row"><label class="grow">Add your own tags<input id="tag-input" maxlength="60" placeholder="e.g. Weeknight, Vegetarian" autocomplete="off" aria-controls="tag-suggestions"></label><button type="button" class="secondary" id="add-tag">Add tag</button></div><div id="tag-suggestions" class="tag-suggestions" aria-label="Matching existing tags"></div></section><section class="recipe-section"><div class="section-heading"><h2>Ingredients</h2></div><p>Enter one ingredient per line. Quantities are optional.</p>${d.ingredients.map((name, i) => `<div class="entry-row ingredient-input-row"><label class="grow">Ingredient ${i + 1}<input id="ingredient-${i}" maxlength="300" value="${esc(name)}" placeholder="e.g. Tomatoes"></label><label class="quantity-field">Quantity<input id="quantity-${i}" maxlength="100" value="${esc(d.ingredientQuantities[i] || "")}" placeholder="e.g. 2 tbsp" aria-label="Quantity for ingredient ${i + 1}"></label><button type="button" class="icon-button" id="remove-ingredient-${i}" aria-label="Remove ingredient ${i + 1}">×</button></div>`).join("")}<button type="button" class="secondary" id="add-ingredient">＋ Add ingredient</button></section><section class="recipe-section"><h2>Steps</h2><p>Drag the handles to rearrange steps.</p><div id="step-order-status" class="sr-only" role="status"></div>${d.steps.map((s, i) => `<div class="step-row" id="step-row-${i}"><button type="button" class="step-grip" id="step-grip-${i}" aria-label="Reorder step ${i + 1}" title="Drag to reorder; Alt + arrow keys to move" ${d.steps.length < 2 ? "disabled" : ""}>⠿</button><label class="grow">Step ${i + 1}<textarea id="step-${i}" rows="3" maxlength="4000" placeholder="Describe this step">${esc(s.text)}</textarea></label><label class="duration-field">Duration (minutes)<input id="minutes-${i}" type="number" min="0" step="any" value="${esc(s.minutes ?? "")}" placeholder="10"></label><button type="button" class="icon-button" id="remove-step-${i}" aria-label="Remove step ${i + 1}">×</button></div>`).join("")}<button type="button" class="secondary" id="add-step">＋ Add step</button></section></form></main>`;
+      : "/recipes");
+  app.innerHTML = `<header class="topbar"><a class="brand" href="#/">Mise Studio<span class="period">.</span></a><span id="save-status" role="status">Recipe draft</span></header><main class="workspace recipe-editor"><a class="back" href="${esc(routeHref(back))}">← ${timelineBack ? "Return to timeline" : d.returnTo ? "Back to project" : "Saved recipes"}</a><div class="page-heading recipe-title-row"><div><div class="eyebrow">YOUR RECIPE</div><h1>${savedRecipes[id] ? "Edit recipe" : "Create a recipe"}<span class="period">.</span></h1></div><button class="primary save-button" type="submit" form="recipe-form">Save recipe</button></div>${recipeSource(d)}<form id="recipe-form"><p id="recipe-error" role="alert"></p><section class="recipe-section recipe-import" aria-label="Import a recipe"><h2>Find a recipe</h2><p>Search for a dish, paste a link, or paste labelled recipe text. Review ingredients, steps, and times before saving. Unknown times stay blank.</p>${recipeSearchMarkup({ id: "import-search", listId: "import-search-list", statusId: "import-search-status", placeholder: "e.g. cucumber salad, or paste https://" })}<input id="import-url" type="url" hidden maxlength="4096" autocomplete="off"><button type="button" id="import-from-url" hidden>Import URL</button><label class="grow">Or paste a recipe<textarea id="import-text" rows="6" maxlength="100000" placeholder="Title&#10;&#10;Ingredients&#10;- 1 item&#10;&#10;Instructions&#10;1. Cook."></textarea></label><button type="button" class="secondary" id="import-from-text">Import pasted text</button><p id="import-status" class="recipe-import-status" role="status">${d.importNotice ? esc(d.importNotice) : ""}</p><div id="import-choices" class="import-choices"></div></section><section class="parameters"><label class="name-field">Recipe name<input id="recipe-title" maxlength="160" required value="${esc(d.title)}" placeholder="e.g. Japanese potato salad"></label><label>Serves<input id="recipe-servings" type="number" min="1" max="999" step="1" value="${esc(d.servings ?? "")}"></label></section><section class="recipe-section"><h2>Tags</h2><div class="tags">${d.tags.map((t, i) => `<button type="button" class="tag" id="tag-${i}" aria-label="Remove tag ${esc(t)}">${esc(t)} ×</button>`).join("")}</div><div class="entry-row"><label class="grow">Add your own tags<input id="tag-input" maxlength="60" placeholder="e.g. Weeknight, Vegetarian" autocomplete="off" aria-controls="tag-suggestions"></label><button type="button" class="secondary" id="add-tag">Add tag</button></div><div id="tag-suggestions" class="tag-suggestions" aria-label="Matching existing tags"></div></section><section class="recipe-section"><div class="section-heading"><h2>Ingredients</h2></div><p>Enter one ingredient per line. Quantities are optional.</p>${d.ingredients.map((name, i) => `<div class="entry-row ingredient-input-row"><label class="grow">Ingredient ${i + 1}<input id="ingredient-${i}" maxlength="300" value="${esc(name)}" placeholder="e.g. Tomatoes"></label><label class="quantity-field">Quantity<input id="quantity-${i}" maxlength="100" value="${esc(d.ingredientQuantities[i] || "")}" placeholder="e.g. 2 tbsp" aria-label="Quantity for ingredient ${i + 1}"></label><button type="button" class="icon-button" id="remove-ingredient-${i}" aria-label="Remove ingredient ${i + 1}">×</button></div>`).join("")}<button type="button" class="secondary" id="add-ingredient">＋ Add ingredient</button></section><section class="recipe-section"><h2>Steps</h2><p>Drag the handles to rearrange steps.</p><div id="step-order-status" class="sr-only" role="status"></div>${d.steps.map((s, i) => `<div class="step-row" id="step-row-${i}"><button type="button" class="step-grip" id="step-grip-${i}" aria-label="Reorder step ${i + 1}" title="Drag to reorder; Alt + arrow keys to move" ${d.steps.length < 2 ? "disabled" : ""}>⠿</button><label class="grow">Step ${i + 1}<textarea id="step-${i}" rows="3" maxlength="4000" placeholder="Describe this step">${esc(s.text)}</textarea></label><label class="duration-field">Duration (minutes)<input id="minutes-${i}" type="number" min="0" step="any" value="${esc(s.minutes ?? "")}" placeholder="10"></label><button type="button" class="icon-button" id="remove-step-${i}" aria-label="Remove step ${i + 1}">×</button></div>`).join("")}<button type="button" class="secondary" id="add-step">＋ Add step</button></section></form></main>`;
   const field = (selector, fn) =>
     (document.querySelector(selector).oninput = (e) => {
       fn(e.target.value);
@@ -926,7 +936,7 @@ function commitRecipe(id) {
       "Unable to save this recipe. Keep this page open and try again.";
     return false;
   }
-  navigate(target ? "/project/" + target.id : "/recipes");
+  navigate(timelineReturnPath() || (target ? "/project/" + target.id : "/recipes"));
   return true;
 }
 function attachedRecipe(dish) {
@@ -1254,7 +1264,11 @@ function drawTimeline(scrollPosition, verticalPosition) {
     )
     .join(
       "",
-    )}</div>${model.issues.length ? `<details class="tl-issues"><summary>${model.issues.length} ${model.issues.length === 1 ? "dish needs" : "dishes need"} attention before scheduling</summary><ul>${model.issues.map((i) => `<li><strong>${esc(i.name)}:</strong> ${esc(i.reason)}</li>`).join("")}</ul></details>` : ""}<div class="tl-workspace"><div class="tl-chart-area"><div class="tl-scroll" id="tl-scroll" tabindex="0" aria-label="Scrollable cooking timeline"><div class="tl-chart-track"><div class="tl-row-axis" aria-label="Dish rows" style="height:${height}px"><div class="tl-axis-heading" style="height:${header}px"><strong>Dishes</strong></div>${rows.map((row,i)=>`<div class="tl-axis-row" style="top:${row.top}px;height:${row.height}px" title="${esc(row.name)} · ${esc(row.courseName)}"><i style="background:${row.color}"></i><span><strong>${esc(row.name)}</strong><small>${esc(row.courseName)}${!row.blocks.length?' · Not scheduled':''}</small></span></div>`).join('')}</div><div class="tl-canvas" style="width:${width}px;height:${height}px">${rows.map(row=>`<div class="tl-row-band" style="top:${row.top}px;height:${row.height}px" aria-hidden="true"></div>`).join('')}${ticks.map((t) => `<div class="tl-tick" style="left:${(t - model.min) * zoom}px;height:${height}px"><span>${timelineTime(t)}</span></div>`).join("")}${services.map((s, i) => `<div class="tl-service" style="left:${(s.time - model.min) * zoom}px;top:${34 + i * 24}px;height:${height - 34 - i * 24}px"><span>${esc(s.name)} · ${timelineTime(s.time)}</span></div>`).join("")}${layout.map((b, i) => `<button type="button" class="tl-block" id="tl-block-${i}" data-tl-dish="${esc(b.dishId)}" data-tl-step="${b.index}" style="left:${b.left}px;top:${b.top}px;width:${b.width}px;background:${b.color}" aria-label="${esc(b.dishName)}, step ${b.index + 1}: ${esc(b.text)}, ${b.duration} minutes, ${timelineTime(b.start)}" title="${esc(b.dishName)} · Step ${b.index + 1}&#10;${esc(b.text)}&#10;${b.duration} min · ${timelineTime(b.start)}–${timelineTime(b.end)}">${esc(b.text.trim().split(/\s+/)[0] || "Step")}</button>`).join("")}${!blocks.length ? '<div class="tl-empty">No steps are scheduled yet. Complete the items needing attention to build the timeline.</div>' : ""}</div></div></div><p class="tl-hint">Scroll sideways to explore. Hover or focus a block for details. Dragging snaps to five-minute marks. Arrow keys move a focused step to the next five-minute mark. Times after midnight show a day offset.</p><p id="tl-status" role="status" class="sr-only"></p></div></div><aside id="tl-planner" class="tl-planner" aria-label="Cooking planner" ${state.plannerOpen ? "" : "hidden"}><div class="tl-planner-heading"><h3>Cooking planner</h3><button class="secondary" id="tl-planner-close" aria-label="Close cooking planner">×</button></div><p>Start times for all scheduled dishes</p><ol>${list.map((b) => `<li><time>${timelineTime(b.start)}</time><div><strong style="color:${b.color}">${esc(b.dishName)} · Step ${b.index + 1}</strong><p>${esc(b.text)}</p><small>${b.duration} min</small></div></li>`).join("") || "<li>No steps to show.</li>"}</ol></aside><div id="tl-tooltip" class="tl-tooltip" role="tooltip" hidden></div>`;
+    )}</div>${model.issues.length ? `<details class="tl-issues"><summary>${model.issues.length} ${model.issues.length === 1 ? "dish needs" : "dishes need"} attention before scheduling</summary><ul>${model.issues.map((i) => `<li><strong>${esc(i.name)}:</strong> ${esc(i.reason)}</li>`).join("")}</ul></details>` : ""}<div class="tl-workspace"><div class="tl-chart-area"><div class="tl-scroll" id="tl-scroll" tabindex="0" aria-label="Scrollable cooking timeline"><div class="tl-chart-track"><div class="tl-row-axis" aria-label="Dish rows" style="height:${height}px"><div class="tl-axis-heading" style="height:${header}px"><strong>Dishes</strong></div>${rows.map((row) => {
+      const tag = row.recipeId ? "a" : "div";
+      const link = row.recipeId ? ` href="#/recipe/edit/${esc(encodeURIComponent(row.recipeId))}?timeline=${esc(encodeURIComponent(project.id))}" aria-label="Edit recipe for ${esc(row.name)}"` : "";
+      return `<${tag} class="tl-axis-row" style="top:${row.top}px;height:${row.height}px"${link} title="${esc(row.name)} · ${esc(row.courseName)}"><i style="background:${row.color}"></i><span><strong>${esc(row.name)}</strong><small>${esc(row.courseName)}${!row.blocks.length ? " · Not scheduled" : ""}</small></span></${tag}>`;
+    }).join("")}</div><div class="tl-canvas" style="width:${width}px;height:${height}px">${rows.map(row=>`<div class="tl-row-band" style="top:${row.top}px;height:${row.height}px" aria-hidden="true"></div>`).join('')}${ticks.map((t) => `<div class="tl-tick" style="left:${(t - model.min) * zoom}px;height:${height}px"><span>${timelineTime(t)}</span></div>`).join("")}${services.map((s, i) => `<div class="tl-service" style="left:${(s.time - model.min) * zoom}px;top:${34 + i * 24}px;height:${height - 34 - i * 24}px"><span>${esc(s.name)} · ${timelineTime(s.time)}</span></div>`).join("")}${layout.map((b, i) => `<button type="button" class="tl-block" id="tl-block-${i}" data-tl-dish="${esc(b.dishId)}" data-tl-step="${b.index}" style="left:${b.left}px;top:${b.top}px;width:${b.width}px;background:${b.color}" aria-label="${esc(b.dishName)}, step ${b.index + 1}: ${esc(b.text)}, ${b.duration} minutes, ${timelineTime(b.start)}" title="${esc(b.dishName)} · Step ${b.index + 1}&#10;${esc(b.text)}&#10;${b.duration} min · ${timelineTime(b.start)}–${timelineTime(b.end)}">${esc(b.text.trim().split(/\s+/)[0] || "Step")}</button>`).join("")}${!blocks.length ? '<div class="tl-empty">No steps are scheduled yet. Complete the items needing attention to build the timeline.</div>' : ""}</div></div></div><p class="tl-hint">Scroll sideways to explore. Hover or focus a block for details. Dragging snaps to five-minute marks. Arrow keys move a focused step to the next five-minute mark. Times after midnight show a day offset.</p><p id="tl-status" role="status" class="sr-only"></p></div></div><aside id="tl-planner" class="tl-planner" aria-label="Cooking planner" ${state.plannerOpen ? "" : "hidden"}><div class="tl-planner-heading"><h3>Cooking planner</h3><button class="secondary" id="tl-planner-close" aria-label="Close cooking planner">×</button></div><p>Start times for all scheduled dishes</p><ol>${list.map((b) => `<li><time>${timelineTime(b.start)}</time><div><strong style="color:${b.color}">${esc(b.dishName)} · Step ${b.index + 1}</strong><p>${esc(b.text)}</p><small>${b.duration} min</small></div></li>`).join("") || "<li>No steps to show.</li>"}</ol></aside><div id="tl-tooltip" class="tl-tooltip" role="tooltip" hidden></div>`;
   const scroller = document.querySelector("#tl-scroll");
   if (Number.isFinite(scrollPosition)) scroller.scrollLeft = scrollPosition;
   if(Number.isFinite(verticalPosition))scroller.scrollTop=verticalPosition;
@@ -1393,4 +1407,52 @@ function drawTimeline(scrollPosition, verticalPosition) {
       el.onpointercancel = finish;
     };
   });
+}
+
+function restoreWorkspace(text) {
+  const data = decodeBackup(text);
+  if (localStorage.getItem(storageKey) !== lastStored)
+    throw new Error("This workspace changed in another tab. Reload before importing.");
+  const counts = ["projects", "recipes", "drafts"].map(name => Object.keys(data[name]).length + " " + name).join(", ");
+  if (!confirm("Replace ALL projects, saved recipes, and drafts in this browser with this backup (" + counts + ")? This cannot be undone. Export your current workspace first if you want to keep it.")) return false;
+  const serialized = JSON.stringify(data);
+  // Write first: a failed storage write must leave the current workspace intact.
+  localStorage.setItem(storageKey, serialized);
+  projects = data.projects;
+  savedRecipes = data.recipes;
+  recipeDrafts = data.drafts;
+  lastStored = serialized;
+  storageReadFailed = storageFailed = storageConflict = false;
+  navigate("/");
+  document.querySelector("#backup-status").textContent = "Workspace restored successfully.";
+  return true;
+}
+function bindBackupControls() {
+  const status = document.querySelector("#backup-status");
+  document.querySelector("#export-workspace").onclick = () => {
+    try {
+      if (storageReadFailed) throw new Error("Existing data could not be read. Export is unavailable to avoid creating an empty backup.");
+      const text = encodeBackup(JSON.parse(snapshot()));
+      const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "mise-studio-backup-" + today() + ".json";
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      status.textContent = "Backup download started. Keep the file somewhere safe.";
+    } catch (error) { status.textContent = "Unable to export. " + error.message; }
+  };
+  const input = document.querySelector("#backup-file");
+  document.querySelector("#import-workspace").onclick = () => input.click();
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      if (!restoreWorkspace(text)) status.textContent = "Import canceled. Your workspace was not changed.";
+    } catch (error) { status.textContent = "Unable to import. " + error.message; }
+    finally { input.value = ""; }
+  };
 }

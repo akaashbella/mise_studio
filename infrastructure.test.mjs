@@ -38,6 +38,9 @@ server.listen(0, "127.0.0.1");
 await once(server, "listening");
 const base = "http://127.0.0.1:" + server.address().port;
 try {
+  const legacyRoute = await fetch(base + "/recipe/edit/test?timeline=project", {redirect:"manual"});
+  assert.equal(legacyRoute.status, 302);
+  assert.equal(legacyRoute.headers.get("location"), "/#/recipe/edit/test?timeline=project");
   for (const path of [
     "/",
     "/recipes",
@@ -90,6 +93,12 @@ try {
   assert.equal(await compressed.text(), await plain.text());
   for (const path of [
     "/.env",
+    "/.env.example",
+    "/package.json",
+    "/package-lock.json",
+    "/lib/recipe-api.mjs",
+    "/data/recipes.sqlite",
+    "/mise_studio/public/app.js",
     "/server.mjs",
     "/../server.mjs",
     "/%2e%2e/server.mjs",

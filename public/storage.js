@@ -122,6 +122,7 @@ export function validateWorkspace(data) {
   assert(record(data));
   assert(data.schemaVersion === undefined || data.schemaVersion === 3);
   const result = {};
+  if (data.schemaVersion !== undefined) result.schemaVersion = data.schemaVersion;
   for (const [field, validate] of [
     ["projects", project],
     ["recipes", recipe],
@@ -147,4 +148,24 @@ export function loadWorkspace(storage, key) {
     recipes: {},
     drafts: {},
   });
+}
+
+export function encodeBackup(workspace) {
+  return JSON.stringify({
+    format: "mise-studio-workspace",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    workspace: validateWorkspace(workspace),
+  }, null, 2);
+}
+
+export function decodeBackup(text) {
+  let backup;
+  try { backup = JSON.parse(text); }
+  catch { throw new Error("Choose a valid Mise Studio JSON backup."); }
+  if (!record(backup) || backup.format !== "mise-studio-workspace" || backup.version !== 1)
+    throw new Error("Unsupported backup format or version. Use a Mise Studio version 1 backup.");
+  if (!record(backup.workspace) || !["projects", "recipes", "drafts"].every(key => record(backup.workspace[key])))
+    throw new Error("The backup is incomplete. Projects, recipes, and drafts are required.");
+  return validateWorkspace(backup.workspace);
 }

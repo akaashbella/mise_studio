@@ -40,6 +40,12 @@ export function createAppServer(options = {}) {
         res.end("Method not allowed");
         return;
       }
+      // Preserve old local bookmarks while the app now uses static-hosted hash routes.
+      if (pageRoute.test(pathname)) {
+        res.writeHead(302, { Location: "/#" + pathname + new URL(req.url, "http://localhost").search });
+        res.end();
+        return;
+      }
       const route =
         routes.get(pathname) ||
         (pageRoute.test(pathname) ? routes.get("/") : null);
